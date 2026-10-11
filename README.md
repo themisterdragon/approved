@@ -64,10 +64,12 @@ to compare.
 Check these against your own state's standards; the debrief prompts are
 written to start the discussion, not to replace your lesson.
 
-- **ELA (CCSS, grades 9-12):** themes and how they develop (RL.2), an
-  author's choices about structure and character (RL.3), point of view and
-  rhetoric, including propaganda (RI.6), collaborative discussion (SL.1),
-  and argument writing from the debrief (W.1).
+- **ELA (CCSS, grades 9-12):** themes and how they develop (RL.9-10.2,
+  RL.11-12.2), an author's choices about structure and character
+  (RL.9-10.3, RL.11-12.3), point of view and rhetoric, including
+  propaganda (RI.9-10.6, RI.11-12.6), collaborative discussion
+  (SL.9-10.1, SL.11-12.1), and argument writing from the debrief
+  (W.9-10.1, W.11-12.1).
 - **Civics (C3 Framework, D2.Civ, grades 9-12):** limits on government
   power, rights and the rule of law, and how people use and challenge laws.
   The rule cards map onto the First Amendment (assembly), the Fourth

@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approved</title>
+<body style="background:#0e0f12;color:#e8e1cf;font:20px sans-serif;text-align:center;padding-top:20vh">
+<p id="m">Loading Approved...</p>
+<script>
+fetch("latest.txt?" + Date.now(), { cache: "no-store" })
+  .then((r) => r.text())
+  .then((b) => location.replace("game-" + b.trim() + ".html" + location.search))
+  .catch(() => { document.getElementById("m").textContent = "Couldn't load the game. Please reload the page."; });
+</script>
+</body></html>

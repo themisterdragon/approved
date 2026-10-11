@@ -1,0 +1,10 @@
+# Godot
+.godot/
+/export/
+/build/
+
+
+
+
+__pycache__/
+data/build.txt

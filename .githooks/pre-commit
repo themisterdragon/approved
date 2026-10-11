@@ -1,0 +1,2 @@
+#!/bin/sh
+python3 -I tools/check_privacy.py && python3 -I tools/check_original.py

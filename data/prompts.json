@@ -1,0 +1,28 @@
+{
+ "about": "Discussion prompts for the debrief. 'game' prompts always show; the others show when that question set was used. Teachers: edit freely.",
+ "game": [
+  "Citizens: when did you feel most watched? What did you change about how you moved?",
+  "Did anyone pass a page to a stranger? What made you decide whom to trust?",
+  "Ruler: which rule did the most to keep order? Which hurt innocent people most?",
+  "Look at the wall at the start and at the end. Who noticed the changes, and when?",
+  "How many innocent people were taken? Was that a cost the ruler counted?"
+ ],
+ "1984": [
+  "Winston's job is to change the record. How did amending the wall today compare?",
+  "The Party watches through telescreens. How did knowing where the cameras were change what you did?",
+  "Julia breaks rules in small ways to survive. Did anyone play like Julia? Like Winston?",
+  "Why might a state want people to doubt their own memory of the rules?"
+ ],
+ "Animal Farm": [
+  "The commandments on the barn wall change, and the animals doubt their memories. How did the wall in this game work the same way?",
+  "Squealer explains every change. What would a Squealer have said about today's amendments?",
+  "Boxer trusts and works harder. Did trust protect anyone in this game?",
+  "Which rule today would the pigs have liked best, and why?"
+ ],
+ "Civics": [
+  "Which rules today would break the First Amendment? Which would break the Fourth?",
+  "The ruler could take anyone the cameras saw. What does due process add that this game lacked?",
+  "Changing a rule and punishing people who broke the old wording: why does the Constitution forbid ex post facto laws?",
+  "What checks on the ruler's power would have changed today's outcome?"
+ ]
+}

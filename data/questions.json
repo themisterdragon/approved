@@ -1,0 +1,50 @@
+{
+ "about": "Questions the Bureau's clerks ask a citizen who has been taken. Each set is a list of {q, answer, wrong: [three]}. Teachers: edit freely, or add your own set; keep answers short (they show on buttons).",
+ "sets": {
+  "1984": [
+   {"q": "What does Winston keep in secret that is itself a crime?", "answer": "A diary", "wrong": ["A radio", "A map", "A weapon"]},
+   {"q": "Where does Winston work?", "answer": "The Ministry of Truth", "wrong": ["The Ministry of Love", "The Ministry of Plenty", "The Ministry of Peace"]},
+   {"q": "What is Winston's job?", "answer": "Rewriting old records", "wrong": ["Guarding prisoners", "Repairing telescreens", "Writing songs"]},
+   {"q": "What is a memory hole used for?", "answer": "Destroying documents", "wrong": ["Hiding from cameras", "Storing food", "Sending letters"]},
+   {"q": "What is Newspeak designed to do?", "answer": "Narrow the range of thought", "wrong": ["Make speech more beautiful", "Help trade abroad", "Teach children to read"]},
+   {"q": "What is doublethink?", "answer": "Believing two contradictions at once", "wrong": ["Thinking before speaking", "A code for messages", "A kind of game"]},
+   {"q": "Where do Winston and Julia meet in secret?", "answer": "A room above a junk shop", "wrong": ["The Ministry canteen", "Winston's flat", "A cafe"]},
+   {"q": "Who is the Party's named enemy, said to lead the Brotherhood?", "answer": "Goldstein", "wrong": ["O'Brien", "Syme", "Charrington"]},
+   {"q": "Who reports Parsons to the Thought Police?", "answer": "His daughter", "wrong": ["His wife", "Winston", "His neighbour"]},
+   {"q": "What waits for each prisoner in Room 101?", "answer": "Their worst fear", "wrong": ["A trial", "Their family", "A way out"]},
+   {"q": "What does Winston fear most?", "answer": "Rats", "wrong": ["Snakes", "Dogs", "Heights"]},
+   {"q": "What is the Two Minutes Hate?", "answer": "A daily ritual of rage", "wrong": ["A sports match", "A punishment", "A holiday"]},
+   {"q": "Who turns out to be loyal to the Party all along?", "answer": "O'Brien", "wrong": ["Julia", "Syme", "Parsons"]},
+   {"q": "How does Winston feel at the novel's end?", "answer": "He loves Big Brother", "wrong": ["He escapes", "He is still defiant", "He forgets Julia's name"]}
+  ],
+  "Animal Farm": [
+   {"q": "What is the farm called before the rebellion?", "answer": "Manor Farm", "wrong": ["Foxwood", "Pinchfield", "Willingdon"]},
+   {"q": "Whose dream inspires the rebellion?", "answer": "Old Major", "wrong": ["Napoleon", "Boxer", "Moses"]},
+   {"q": "Who owns the farm at the start?", "answer": "Mr. Jones", "wrong": ["Mr. Pilkington", "Mr. Frederick", "Mr. Whymper"]},
+   {"q": "Which two pigs lead after the rebellion?", "answer": "Napoleon and Snowball", "wrong": ["Squealer and Minimus", "Boxer and Clover", "Benjamin and Mollie"]},
+   {"q": "What does Snowball want the animals to build?", "answer": "A windmill", "wrong": ["A wall", "A school", "A barn"]},
+   {"q": "How does Napoleon drive Snowball off the farm?", "answer": "With dogs he raised", "wrong": ["With a vote", "With a trick", "With the sheep"]},
+   {"q": "Who explains away Napoleon's decisions to the animals?", "answer": "Squealer", "wrong": ["Boxer", "Benjamin", "Clover"]},
+   {"q": "What is Boxer's answer to every problem?", "answer": "To work harder", "wrong": ["To ask questions", "To leave the farm", "To rest"]},
+   {"q": "What really happens to Boxer?", "answer": "He is sold to a knacker", "wrong": ["He retires in peace", "He becomes a leader", "He escapes"]},
+   {"q": "Which raven tells of a paradise after death?", "answer": "Moses", "wrong": ["Mollie", "Muriel", "Minimus"]},
+   {"q": "What happens to the Seven Commandments over time?", "answer": "They are quietly changed", "wrong": ["They are forgotten", "They are carved in stone", "They are voted on"]},
+   {"q": "What do the sheep do whenever there is debate?", "answer": "Bleat a slogan", "wrong": ["Leave the meeting", "Vote no", "Fall asleep"]},
+   {"q": "At the end, what can the animals no longer tell apart?", "answer": "The pigs and the humans", "wrong": ["Day and night", "The dogs and the sheep", "Friends and enemies"]}
+  ],
+  "Civics": [
+   {"q": "Which amendment protects the right to peaceably assemble?", "answer": "The First", "wrong": ["The Second", "The Fourth", "The Tenth"]},
+   {"q": "Which amendment protects against unreasonable searches?", "answer": "The Fourth", "wrong": ["The First", "The Sixth", "The Eighth"]},
+   {"q": "What does 'due process' guarantee?", "answer": "Fair legal procedures", "wrong": ["Free housing", "Faster trials only", "The right to vote"]},
+   {"q": "What does 'rule of law' mean?", "answer": "Laws apply to leaders too", "wrong": ["Leaders make all laws", "Police decide guilt", "Laws never change"]},
+   {"q": "Why does the Constitution separate powers?", "answer": "So no branch has too much power", "wrong": ["To speed up laws", "To save money", "To please the states"]},
+   {"q": "What is habeas corpus?", "answer": "The right to challenge detention", "wrong": ["A kind of jury", "A tax law", "A military rank"]},
+   {"q": "What is an ex post facto law?", "answer": "Punishing acts after the fact", "wrong": ["A law about elections", "A law about borders", "A temporary law"]},
+   {"q": "Which is an example of checks and balances?", "answer": "Congress overriding a veto", "wrong": ["A governor's speech", "A city parade", "A school board vote"]},
+   {"q": "Why does a free press matter to self-government?", "answer": "Citizens can learn what leaders do", "wrong": ["It sells advertising", "It replaces elections", "It makes laws"]},
+   {"q": "What is propaganda?", "answer": "Messages built to steer belief", "wrong": ["Any news story", "A type of law", "A kind of vote"]},
+   {"q": "What is a totalitarian state?", "answer": "One that controls all of life", "wrong": ["One with many parties", "One run by a monarch only", "One with no army"]},
+   {"q": "The First Amendment also protects the right to...", "answer": "Petition the government", "wrong": ["Own any weapon", "Refuse jury duty", "Avoid taxes"]}
+  ]
+ }
+}

@@ -8,6 +8,7 @@ extends Node2D
 
 const SEND_EVERY := 0.1
 const STEP := 1.0 / 30
+const CLOSE := 2.6       # how close the camera is round a citizen
 
 var sim: Sim             # (host and practice) the town itself
 var role := "citizen"
@@ -48,7 +49,20 @@ var take_b: Button
 var overlay: Control
 var amend_buttons := {}
 var buttons_box: HBoxContainer
+var top_box: VBoxContainer
+var hud_root: Control
+var msg_card: PanelContainer
+var wall_card: PanelContainer
+var fold_b: Button
+var pages_icons: UI.Pages
+var stat_l := {}
+var hint_l: Label
+var hint_used := false
+var wall_lines: Array = []
 var hurry_on := false
+var zoom_in := 1.0      # (ruler) how far in from the whole town; (citizen) the zoom itself
+var look_at := Vector2.ZERO  # (ruler) the middle of the view
+var dragging := false
 const DELAY := 60.0
 var board_history: Array = []  # (host) watchers' snapshots, for the delayed view
 var board_t := 0.0
@@ -105,6 +119,7 @@ func _ready() -> void:
 			Net.send(Game.host_peer, {"k": "ready"})
 	view.mode = role
 	view.seat = seat
+	zoom_in = CLOSE if role == "citizen" else 1.0
 	if role == "public":
 		view.mode = _board_mode()
 		view.seat = -1
@@ -242,6 +257,7 @@ func _process(delta: float) -> void:
 		rules_wait -= delta
 		if rules_wait <= 0:
 			_begin(Rules.DEFAULT.duplicate())
+	hud_root.visible = phase == "play"
 	if phase == "play":
 		_input_frame(delta)
 		_camera(delta)
@@ -278,16 +294,33 @@ func _show(s: Dictionary) -> void:
 func _camera(delta: float) -> void:
 	var vp := get_viewport_rect().size
 	var world := view.world_size()
+	var fit := minf(vp.x / world.x, vp.y / world.y)
 	if role == "citizen" and view.me >= 0 and view.me < view.pos.size() and snap.get("you", {}).get("state", "") == "":
-		var target := view.pos[view.me]
-		cam.zoom = Vector2.ONE * 2.0
+		# close in round yourself (the mouse wheel steps in or out a little)
+		var target := view.pos[view.me] + Vector2(0, -10)
+		cam.zoom = cam.zoom.lerp(Vector2.ONE * zoom_in, 1 - exp(-delta * 8))
 		cam.position = cam.position.lerp(target, 1 - exp(-delta * 6)) if cam.position != Vector2.ZERO else target
-		var half := vp / cam.zoom / 2
-		cam.position = cam.position.clamp(half, world - half)
+	elif role == "ruler":
+		# the whole town, or closer with the wheel; arrow keys, WASD or a
+		# right-button drag move round it
+		var z := fit * zoom_in
+		cam.zoom = cam.zoom.lerp(Vector2.ONE * z, 1 - exp(-delta * 10))
+		var mv := Vector2(
+			float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
+			float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
+		look_at += mv * 700.0 * delta / cam.zoom.x
+		if look_at == Vector2.ZERO:
+			look_at = world / 2
+		cam.position = look_at
 	else:
-		var z := minf(vp.x / world.x, vp.y / world.y)
-		cam.zoom = Vector2.ONE * z
+		cam.zoom = Vector2.ONE * fit
 		cam.position = world / 2
+	# never past the town's edge (and centred when the town is smaller than the screen)
+	var half := vp / cam.zoom / 2
+	for k in 2:
+		cam.position[k] = world[k] / 2 if half[k] * 2 >= world[k] else clampf(cam.position[k], half[k], world[k] - half[k])
+	if role == "ruler":
+		look_at = cam.position
 
 
 # ------------------------------------------------------------------- input
@@ -332,9 +365,27 @@ func _unhandled_input(event: InputEvent) -> void:
 				latched.give = true
 			KEY_1, KEY_2, KEY_3, KEY_4:
 				latched.ans = event.physical_keycode - KEY_1
+			KEY_TAB:
+				if wall_box:
+					_fold_wall()
 			KEY_ENTER, KEY_KP_ENTER:
 				if role == "ruler":
 					_take()
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var k := 1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1 / 1.15
+		if role == "citizen":
+			zoom_in = clampf(zoom_in * k, 1.8, 3.6)
+		elif role == "ruler":
+			var before := get_global_mouse_position()
+			zoom_in = clampf(zoom_in * k, 1.0, 3.0)
+			look_at += (before - look_at) * (1 - 1 / k)  # (zoom towards the mouse)
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and role == "ruler":
+		dragging = event.pressed
+		return
+	if event is InputEventMouseMotion and dragging:
+		look_at -= event.relative / cam.zoom
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var at := get_global_mouse_position()
 		if role == "citizen":
@@ -479,6 +530,8 @@ func _end(summary: Dictionary) -> void:
 		Game.last_rulers = Game.rulers.duplicate()
 	if overlay:
 		overlay.queue_free()
+	for c in hud.get_children():  # (the day's HUD goes; the record takes the screen)
+		c.visible = false
 	overlay = Debrief.new(summary, Game.mode != Game.Mode.CLIENT, _again, _to_menu)
 	hud.add_child(overlay)
 
@@ -497,30 +550,41 @@ func _to_menu() -> void:
 # --------------------------------------------------------------------- hud
 
 func _hud() -> void:
-	var top := HBoxContainer.new()
-	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE, Control.PRESET_MODE_MINSIZE, 18)
-	top.add_theme_constant_override("separation", 28)
-	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(top)
-	var pad := Control.new()
-	pad.custom_minimum_size.x = 8
-	top.add_child(pad)
-	clock_l = UI.label("", UI.head, 44, UI.PAPER, top)
-	phase_l = UI.label("", UI.bold, 26, UI.MUTED, top)
+	# everything of the day's HUD sits under the overlays (rules, questioning, debrief)
+	hud_root = Control.new()
+	hud_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(hud_root)
+	hud.move_child(hud_root, 0)
+	# top left: the clock, the time of day, and who you are
+	var tl := UI.card(hud_root)
+	tl.position = Vector2(20, 18)
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 4)
+	tl.add_child(tv)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	tv.add_child(row)
+	clock_l = UI.label("", UI.head, 50, UI.PAPER, row)
+	phase_l = UI.label("", UI.head, 26, UI.MUTED, row)
 	phase_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	info_l = UI.label("", UI.bold, 26, UI.PAPER, top)
-	info_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	info_l = UI.label("", UI.bold, 22, UI.MUTED, tv)
+	top_box = tv
+	# bottom left: the last thing that happened in town (two lines at most)
 	news_box = VBoxContainer.new()
-	news_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
+	news_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 22)
 	news_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	news_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(news_box)
-	msg_l = UI.label("", UI.bold, 30, UI.PAPER)
+	news_box.add_theme_constant_override("separation", 4)
+	hud_root.add_child(news_box)
+	# bottom middle: what's happening to you, on a strip of its own
+	msg_card = UI.card(hud_root, 0.88)
+	msg_l = UI.label("", UI.bold, 26, UI.PAPER, msg_card)
 	msg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hud.add_child(msg_l)
-	msg_l.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 150)
-	msg_l.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	msg_l.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	msg_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 120)
+	msg_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	msg_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	msg_card.visible = false
 	match role:
 		"citizen":
 			_citizen_hud()
@@ -528,55 +592,94 @@ func _hud() -> void:
 			_ruler_hud()
 
 
+## The wall, top right: a card you can fold away (Tab) to see the streets.
 func _wall_panel(title: String) -> void:
-	var p := UI.panel(hud)
-	p.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 18)
+	var p := UI.card(hud_root)
+	p.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
 	p.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	p.position.y = 90
-	p.custom_minimum_size.x = 520
+	p.position.y = 18
+	p.mouse_filter = Control.MOUSE_FILTER_PASS
+	wall_card = p
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	p.add_child(v)
+	var head := HBoxContainer.new()
+	v.add_child(head)
+	var t := UI.label(title, UI.head, 32, UI.PAPER, head)
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var fold := UI.button("HIDE  (TAB)", _fold_wall, head, Vector2(130, 36), 17)
+	fold.focus_mode = Control.FOCUS_NONE
+	fold.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	fold_b = fold
 	wall_box = VBoxContainer.new()
-	wall_box.add_theme_constant_override("separation", 8)
-	p.add_child(wall_box)
-	UI.label(title, UI.head, 30, UI.PAPER, wall_box)
-	wall_note = UI.label("", UI.body, 20, UI.MUTED, wall_box)
+	wall_box.add_theme_constant_override("separation", 10)
+	v.add_child(wall_box)
+	wall_note = UI.label("", UI.body, 19, UI.MUTED, v)
 	wall_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	wall_note.custom_minimum_size.x = 480
+	wall_note.custom_minimum_size.x = 430
+
+
+func _fold_wall() -> void:
+	wall_box.visible = not wall_box.visible
+	wall_note.visible = wall_box.visible
+	fold_b.text = "HIDE  (TAB)" if wall_box.visible else "SHOW  (TAB)"
 
 
 func _citizen_hud() -> void:
-	_wall_panel("THE WALL, AS YOU REMEMBER IT")
-	var left := VBoxContainer.new()
-	left.position = Vector2(26, 90)
-	hud.add_child(left)
-	pages_l = UI.label("", UI.bold, 30, UI.PAPER, left)
-	eye_l = UI.label("", UI.head, 34, UI.RED_BRIGHT, left)
+	_wall_panel("THE WALL")
+	var pr := HBoxContainer.new()
+	pr.add_theme_constant_override("separation", 14)
+	top_box.add_child(pr)
+	pages_icons = UI.Pages.new()
+	pr.add_child(pages_icons)
+	pages_l = UI.label("", UI.bold, 22, UI.PAPER, pr)
+	pages_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	eye_l = UI.label("", UI.head, 34, UI.RED_BRIGHT, top_box)
 	buttons_box = HBoxContainer.new()
-	buttons_box.add_theme_constant_override("separation", 14)
-	hud.add_child(buttons_box)
-	buttons_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
+	buttons_box.add_theme_constant_override("separation", 12)
+	hud_root.add_child(buttons_box)
+	buttons_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 22)
 	buttons_box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	buttons_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	var hb := UI.button("HURRY (SHIFT)", func(): hurry_on = not hurry_on, buttons_box, Vector2(230, 70), 24)
+	var hb := UI.action("HURRY", "Shift", func(): hurry_on = not hurry_on, buttons_box, 170)
 	hb.toggle_mode = true
-	UI.button("NOD (SPACE)", func(): latched.nod = true, buttons_box, Vector2(210, 70), 24)
-	UI.button("PASS A PAGE (F)", func(): latched.give = true, buttons_box, Vector2(260, 70), 24)
-	for b in buttons_box.get_children():
-		b.focus_mode = Control.FOCUS_NONE
+	UI.action("NOD", "Space", func(): latched.nod = true, buttons_box, 150)
+	UI.action("PASS A PAGE", "F", func(): latched.give = true, buttons_box, 210)
 
 
 func _ruler_hud() -> void:
 	_wall_panel("THE WALL")
-	subject = UI.panel(hud)
-	subject.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 18)
+	var stats := HBoxContainer.new()
+	stats.add_theme_constant_override("separation", 22)
+	top_box.add_child(stats)
+	for k in ["WARRANTS", "UNREST", "AT LARGE"]:
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", -6)
+		stats.add_child(v)
+		var n := UI.label("0", UI.head, 34, UI.PAPER, v)
+		UI.label(k, UI.bold, 15, UI.MUTED, v)
+		stat_l[k] = n
+	info_l.visible = false
+	subject = UI.card(hud_root, 0.9)
+	subject.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 22)
 	subject.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	subject.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	subject.mouse_filter = Control.MOUSE_FILTER_PASS
 	var sb := VBoxContainer.new()
+	sb.add_theme_constant_override("separation", 10)
 	subject.add_child(sb)
-	subject_l = UI.label("", UI.bold, 24, UI.PAPER, sb)
-	subject_l.custom_minimum_size.x = 440
+	UI.label("UNDER WATCH", UI.head, 28, UI.PAPER, sb)
+	subject_l = UI.label("", UI.bold, 22, UI.PAPER, sb)
+	subject_l.custom_minimum_size.x = 380
 	subject_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	take_b = UI.button("TAKE FOR QUESTIONING (ENTER)", _take, sb, Vector2(440, 64), 24)
+	take_b = UI.button("TAKE FOR QUESTIONING", _take, sb, Vector2(380, 62), 26)
 	take_b.focus_mode = Control.FOCUS_NONE
+	UI.label("or press Enter", UI.body, 17, UI.MUTED, sb).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# a hint along the bottom, until they've got the hang of it
+	hint_l = UI.label("Click one of your cameras, then a street, to move it.   Click someone on camera to watch them.   Wheel: zoom.", UI.body, 20, UI.PAPER, hud_root)
+	hint_l.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 26)
+	hint_l.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hint_l.grow_vertical = Control.GROW_DIRECTION_BEGIN
 
 
 func _update_hud() -> void:
@@ -584,7 +687,8 @@ func _update_hud() -> void:
 		return
 	var left := maxf(float(snap.len) - float(snap.t), 0)
 	clock_l.text = "%d:%02d" % [int(left) / 60, int(left) % 60]
-	phase_l.text = ("NIGHT · CURFEW" if snap.night and Game.rules.has("curfew") else ("NIGHT" if snap.night else "DAY")) + ("   ·   THE BELL" if snap.bell else "")
+	phase_l.text = ("NIGHT · CURFEW" if snap.night and Game.rules.has("curfew") else ("NIGHT" if snap.night else "DAY")) + ("  ·  THE BELL" if snap.bell else "")
+	phase_l.add_theme_color_override("font_color", UI.RED_BRIGHT if snap.bell else UI.MUTED)
 	_news()
 	match role:
 		"citizen":
@@ -592,10 +696,11 @@ func _update_hud() -> void:
 		"ruler":
 			_ruler_frame()
 		"public", "watch":
-			var feed: String = {"eyes": "THE BUREAU'S CAMERAS · LIVE", "town": "THE WHOLE TOWN · ONE MINUTE AGO", "public": "THE STREETS"}.get(view.mode, "")
+			var feed: String = {"eyes": "The Bureau's cameras, live", "town": "The whole town, one minute ago", "public": "The streets"}.get(view.mode, "")
 			if snap.has("wait"):
-				feed = "THE WHOLE TOWN · THE FEED BEGINS IN %d s" % int(snap.wait)
-			info_l.text = "%s     Missing from the count: %d    Taken: %d" % [feed, int(snap.get("gone", 0)), int(snap.get("taken", 0))]
+				feed = "The whole town: the feed begins in %d s" % int(snap.wait)
+			info_l.text = "%s\nMissing from the count: %d     Taken: %d" % [feed, int(snap.get("gone", 0)), int(snap.get("taken", 0))]
+	msg_card.visible = msg_l.text != ""
 
 
 func _news() -> void:
@@ -603,11 +708,16 @@ func _news() -> void:
 		if news_seen.has(int(e[0])):
 			continue
 		news_seen[int(e[0])] = true
-		var l := UI.label("%d:%02d  %s" % [int(e[1]) / 60, int(e[1]) % 60, e[2]], UI.body, 22, UI.MUTED, news_box)
+		var l := UI.label("%d:%02d   %s" % [int(e[1]) / 60, int(e[1]) % 60, e[2]], UI.body, 20, UI.PAPER, news_box)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size.x = 760
-		while news_box.get_child_count() > 4:
+		l.custom_minimum_size.x = 620
+		l.set_meta("t", Time.get_ticks_msec())
+		while news_box.get_child_count() > 2:
 			news_box.get_child(0).free()
+	# each line fades after a while, so the corner is empty when nothing's happening
+	for l in news_box.get_children():
+		var age := (Time.get_ticks_msec() - int(l.get_meta("t"))) / 1000.0
+		l.modulate.a = clampf(1.0 - (age - 9.0) / 2.0, 0.0, 1.0)
 
 
 func _citizen_frame() -> void:
@@ -615,13 +725,20 @@ func _citizen_frame() -> void:
 	if you.is_empty():
 		return
 	info_l.text = "You are Citizen %d" % int(you.num)
-	pages_l.text = "Torn pages: %d of %d" % [int(you.pages), Sim.PAGES_NEEDED]
-	eye_l.text = "WATCHED" if you.seen else ""
-	var lines := ""
-	for r in you.wall:
-		lines += "• " + r + "\n"
+	pages_icons.set_count(int(you.pages), Sim.PAGES_NEEDED)
+	pages_l.text = "torn pages"
+	eye_l.text = "YOU ARE BEING WATCHED" if you.seen else ""
+	eye_l.visible = you.seen
+	if wall_lines != you.wall:
+		wall_lines = (you.wall as Array).duplicate()
+		for c in wall_box.get_children():
+			c.free()
+		for r in you.wall:
+			var l := UI.label("• " + r, UI.bold, 21, UI.PAPER, wall_box)
+			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l.custom_minimum_size.x = 430
 	var ago := float(snap.t) - float(you.wall_t)
-	wall_note.text = lines + ("You read it just now." if ago < 3 else "You last read it %d:%02d ago. It may have changed." % [int(ago) / 60, int(ago) % 60])
+	wall_note.text = "As you read it just now." if ago < 3 else "As you read it %d:%02d ago. It may have changed." % [int(ago) / 60, int(ago) % 60]
 	var m: String = you.msg
 	if snap.get("post", "") != "":
 		m = "THE BELL: stand in %s." % Town.get_town().names[snap.post] + ("\n" + m if m != "" else "")
@@ -640,25 +757,30 @@ func _citizen_frame() -> void:
 
 
 func _ruler_frame() -> void:
-	info_l.text = "Warrants: %d     Unrest: %d     Citizens at large: %d" % [int(snap.warrants), int(snap.unrest), int(snap.left)]
+	stat_l.WARRANTS.text = str(int(snap.warrants))
+	stat_l.UNREST.text = str(int(snap.unrest))
+	stat_l["AT LARGE"].text = str(int(snap.left))
+	stat_l.WARRANTS.add_theme_color_override("font_color", UI.RED_BRIGHT if int(snap.warrants) == 0 else UI.PAPER)
 	# the wall, with each rule amendable
 	if amend_buttons.is_empty():
 		for r in Rules.ORDER:
 			if not (snap.rules as Dictionary).has(r):
 				continue
-			var row := VBoxContainer.new()
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 12)
 			wall_box.add_child(row)
-			var l := UI.label("", UI.bold, 22, UI.PAPER, row)
+			var l := UI.label("", UI.bold, 21, UI.PAPER, row)
 			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			l.custom_minimum_size.x = 480
-			var b := UI.button("AMEND", func(): _amend(r), row, Vector2(160, 44), 20)
-			b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			l.custom_minimum_size.x = 300
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var b := UI.button("AMEND", func(): _amend(r), row, Vector2(116, 44), 20)
+			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			b.focus_mode = Control.FOCUS_NONE
 			amend_buttons[r] = [l, b]
 	for r in amend_buttons:
-		amend_buttons[r][0].text = "• " + Rules.text(r, int(snap.rules[r]))
+		amend_buttons[r][0].text = Rules.text(r, int(snap.rules[r]))
 		amend_buttons[r][1].disabled = float(snap.amend) > 0
-	wall_note.text = "You may amend a rule in %d s. The townsfolk obey at once; citizens only know what they last read." % int(snap.amend) if float(snap.amend) > 0 else "Amend a rule: the townsfolk obey at once; citizens only know what they last read."
+	wall_note.text = "You may amend again in %d s." % int(snap.amend) if float(snap.amend) > 0 else "The townsfolk obey an amendment at once. Citizens only know what they last read."
 	var p := view.picked
 	if p >= 0 and view.seen.has(p):
 		var sus: int = view.seen[p][0]
@@ -666,12 +788,16 @@ func _ruler_frame() -> void:
 		for b in Sim.FLAG_NAMES:
 			if view.seen[p][1] & b:
 				why.append(Sim.FLAG_NAMES[b])
-		subject_l.text = "SUBJECT UNDER WATCH\nSuspicion: %d%%\n%s" % [sus, ("Seen " + ", ".join(why) + ".") if why.size() > 0 else "Nothing out of place."]
+		subject_l.text = "Suspicion: %d%%\n%s" % [sus, ("Seen " + ", ".join(why) + ".") if why.size() > 0 else "Nothing out of place."]
 		take_b.disabled = int(snap.warrants) <= 0
+		subject.visible = true
+		hint_used = true
 	else:
 		view.picked = -1
-		subject_l.text = "Click one of your cameras, then a street, to move it.\nClick a person on camera to watch them closely."
-		take_b.disabled = true
+		subject.visible = false
+	if view.picked_cam >= 0:
+		hint_used = true
+	hint_l.visible = not hint_used and float(snap.t) < 90.0
 
 
 func _amend(rule: String) -> void:
@@ -683,6 +809,8 @@ func _amend(rule: String) -> void:
 
 func _waiting(text: String) -> void:
 	phase = "rules"
+	if overlay:  # (a student ruler's rules picker must go, or it covers their whole day)
+		overlay.queue_free()
 	overlay = ColorRect.new()
 	overlay.color = Color(UI.INK, 0.92)
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)

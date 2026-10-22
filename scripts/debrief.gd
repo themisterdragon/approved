@@ -96,7 +96,7 @@ func _ready() -> void:
 	for p in lines:
 		var l := UI.label("• " + p, UI.body, 22, UI.PAPER, pv)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size.x = 1500
+		l.custom_minimum_size.x = 1380
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 20)

@@ -75,12 +75,23 @@ written to start the discussion, not to replace your lesson.
   The rule cards map onto the First Amendment (assembly), the Fourth
   (searches), due process, and the ban on ex post facto laws.
 
+## The look
+
+The town is drawn in code, seen from above and a little to the south:
+`scripts/town_art.gd` paints the streets, buildings, gardens and wall once,
+and `scripts/figures.gd` draws the townsfolk. There are twelve kinds of
+people (a works hand in a flat cap, a clerk with a briefcase, a baker, an
+old man with a stick, two with umbrellas...), and every citizen is one of
+them, so three or four people in town always look like you.
+
 ## Controls
 
 Keyboard: WASD or arrows to walk (or click where to go), Shift to hurry,
 Space to nod, F to pass a page, 1-4 to answer. The Bureau: click one of
 your cameras then a street to move it; click a person on camera, then
-*Take for questioning* (or Enter). Touch screens work by tapping.
+*Take for questioning* (or Enter); the mouse wheel zooms in on the town,
+and arrows, WASD or a right-button drag move round it. Tab folds the wall
+card away. Touch screens work by tapping.
 
 ## Building it
 

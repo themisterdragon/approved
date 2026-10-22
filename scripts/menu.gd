@@ -53,7 +53,7 @@ func _ready() -> void:
 	ui.add_child(page)
 	slogan = UI.label("", UI.head, 30, Color(UI.PAPER, 0.5))
 	ui.add_child(slogan)
-	slogan.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 30)
+	slogan.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 12)
 	slogan.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	slogan.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	slogan.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -133,7 +133,7 @@ func _focus_first() -> void:
 func _title() -> void:
 	_clear()
 	Game.mode = Game.Mode.PRACTICE_CITIZEN
-	page.add_child(UI.Stamp.new("APPROVED", 150, -0.08))
+	page.add_child(UI.Stamp.new("APPROVED", 124, -0.08))
 	_text("A game about rules, watching, and getting out.", UI.body, 30, UI.MUTED)
 	UI.button("HOST A CLASS GAME", _host_setup, page)
 	UI.button("JOIN A CLASS GAME", _join_page, page)
@@ -148,13 +148,55 @@ func _title() -> void:
 
 func _how() -> void:
 	_clear()
-	_text("HOW TO PLAY", UI.head, 64)
-	_text("One player is the Bureau (or a council of two or three). Everyone else is a citizen, hidden in a crowd of townsfolk who look exactly like you.", UI.body, 28)
-	_text("CITIZENS: find three torn pages and slip out through the gate in the south wall or the old culvert in the west. Walk like everyone else. Keep the rules, as far as you know them: the wall in Assembly Square says what they are now. Nod to signal another citizen; pass them a page if you trust them. Taken for questioning? Answer two questions on your reading to be let go.", UI.body, 26, UI.MUTED)
-	_text("THE BUREAU: post three rules. Watch through your cameras; move them by clicking one, then a street. Anyone breaking a rule on camera is circled. Take people for questioning, but warrants are few, and taking the innocent is remembered. You may amend a rule; the townsfolk obey the new wording at once.", UI.body, 26, UI.MUTED)
-	_text("Keys: WASD or arrows to walk (or click where to go), SHIFT hurry, SPACE nod, F pass a page, 1-4 answer.", UI.body, 24, UI.MUTED)
+	_text("HOW TO PLAY", UI.head, 60)
+	_text("One player is the Bureau. Everyone else is a citizen, hidden in a crowd that looks just like them.", UI.body, 26)
+	page.add_child(Crowd.new())
+	var cols := HBoxContainer.new()
+	cols.alignment = BoxContainer.ALIGNMENT_CENTER
+	cols.add_theme_constant_override("separation", 24)
+	page.add_child(cols)
+	for side in [["CITIZENS", [
+			"Find three torn pages.",
+			"Slip out by the south gate or the old culvert in the west.",
+			"Walk like everyone else, and keep the rules as you last read them on the wall in Assembly Square.",
+			"Nod to find each other. Pass a page to someone you trust.",
+			"Taken for questioning? Answer two questions on your reading."]],
+		["THE BUREAU", [
+			"Post three rules, worded your way.",
+			"Watch through your cameras. Click one, then a street, to move it.",
+			"Anyone breaking a rule on camera is circled.",
+			"Warrants are few, and taking the innocent goes on the record.",
+			"Amend a rule: the townsfolk obey at once. Citizens don't know until they read the wall."]]]:
+		var c := UI.card(cols, 0.88)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 8)
+		c.add_child(v)
+		UI.label(side[0], UI.head, 34, UI.PAPER, v)
+		for line in side[1]:
+			var l := UI.label("•  " + line, UI.body, 22, UI.PAPER, v)
+			l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l.custom_minimum_size.x = 520
+	_text("Walk: WASD, arrows or click   ·   Hurry: Shift   ·   Nod: Space   ·   Pass a page: F   ·   Answer: 1-4", UI.bold, 21, UI.MUTED)
 	UI.button("BACK", _title, page)
 	_focus_first()
+
+
+## The twelve kinds of townsfolk in a row, walking on the spot.
+class Crowd extends Control:
+	func _init() -> void:
+		custom_minimum_size = Vector2(12 * 64, 92)
+		size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _process(_d: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var tm := Time.get_ticks_msec() / 1000.0
+		for i in Figures.LOOKS.size():
+			var feet := Vector2(32 + i * 64, 84)
+			Figures.ellipse(self, feet, 16, 5, Color(0, 0, 0, 0.4))
+			Figures.draw(self, feet, i, Figures.DOWN, tm * 5.0 + i, true, false, false, 2.1)
 
 
 func _practice(m: int) -> void:
@@ -216,7 +258,7 @@ func _host_setup() -> void:
 				Game.sets.append(s)
 			show.call())
 		show.call()
-	_text("The board, and anyone who joins just to watch: the Bureau's cameras live (the ruler learns nothing new), or the whole town a minute behind, citizens labelled (more to follow, but a ruler could glean where people were). Never the wall's current wording.", UI.body, 22, UI.MUTED)
+	_text("The board (and anyone just watching): cameras live teaches the ruler nothing new; the town a minute late labels the citizens, so a ruler could glean where people were. It never shows the wall's current wording.", UI.body, 21, UI.MUTED)
 	_text("A 45-minute period fits a practice day and a second day for review, each with time to talk after.", UI.body, 22, UI.MUTED)
 	UI.button("OPEN THE TOWN", _open_town, page)
 	UI.button("BACK", _title, page)

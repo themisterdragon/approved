@@ -35,7 +35,7 @@ const PAGES_NEEDED := 3
 const ESCAPE_TIME := 6.0
 const SEARCH_TIME := 2.5
 const NPCS := 36
-const LOOKS := 6
+const LOOKS := 12  # kinds of people (scripts/figures.gd)
 const WALL_AT := Vector2(960, 432)  # the rule wall in Assembly Square
 const WALL_READ := 130.0
 

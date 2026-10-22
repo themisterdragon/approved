@@ -1,9 +1,10 @@
 class_name WorldView
 extends Node2D
-## The town on screen, drawn in code: wet streets under sodium lamps, blocks
-## of flats with a few lit windows, the Works, the Bureau, the old quarter,
-## the rule wall, rain. Then the people, the cameras and (for citizens) the
-## torn pages. What shows depends on who's looking:
+## The town on screen. The town itself (scripts/town_art.gd) is painted once
+## into a picture; over it, live: the people (scripts/figures.gd), the
+## cameras, the torn pages, chimney smoke, rain splashes, and the light
+## (sodium lamps pooling on the wet street, windows after dark, the
+## Bureau's eye). What shows depends on who's looking:
 ##   ruler   - the whole town, but people only where a camera sees
 ##   citizen - close in round yourself; cameras show where they watch
 ##   public  - the empty streets, cameras and lamps (the shared screen on the
@@ -12,11 +13,13 @@ extends Node2D
 ##   eyes    - (watchers) what the cameras see, as the ruler does
 ##   town    - (watchers) everyone, the citizens labelled (a minute behind)
 
-const COATS := ["4a5260", "51555c", "3f4a57", "5a5650", "48505a", "555a63"]
-const HAIR := ["1d1a17", "3b2a1e", "6b5a44", "2a2a2a", "8a8478", "4a3423"]
 const RED := Color("c8283a")
 const PAPER := Color("e8e1cf")
-const LAMP := Color(1.0, 0.68, 0.3)
+const LAMP := Color(1.0, 0.7, 0.34)
+const BAKE := 2.0  # the town is painted at twice its size, so it stays sharp up close
+
+static var _baked: Texture2D
+static var _art := {}  # windows, chimneys, eye: from the painting
 
 var town := Town.get_town()
 var mode := "public"
@@ -36,32 +39,74 @@ var hover_cell := Vector2i(-1, -1)
 var font: Font = load("res://assets/fonts/AtkinsonHyperlegible-Bold.ttf")
 var wall_font: Font = load("res://assets/fonts/Anton-Regular.ttf")
 
-var ground: Node2D
+var ground: Sprite2D
 var glow: Node2D
 var actors: Node2D
 var shade: CanvasModulate
-var _walk_phase := {}
+# each person's last place, which way they face, and their stride
+var _last := {}
+var _face := {}
+var _step := {}
 
 
 func _ready() -> void:
 	shade = CanvasModulate.new()
 	add_child(shade)
-	ground = Ground.new(self)
+	ground = Sprite2D.new()
+	ground.centered = false
+	ground.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	add_child(ground)
+	actors = Actors.new(self)
+	add_child(actors)
 	glow = Glow.new(self)
 	var add := CanvasItemMaterial.new()
 	add.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	glow.material = add
 	add_child(glow)
-	actors = Actors.new(self)
-	add_child(actors)
+	_bake()
 
 
-func _process(delta: float) -> void:
-	# dusk falls: the town darkens and the lamps take over
-	shade.color = Color(0.62, 0.64, 0.72).lerp(Color(0.34, 0.35, 0.48), night)
+## Paint the town once (the first screen to need it), then keep the picture.
+func _bake() -> void:
+	if _baked == null:
+		var vp := SubViewport.new()
+		vp.size = Vector2i(world_size() * BAKE)
+		vp.transparent_bg = false
+		vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+		var art := TownArt.new()
+		art.scale = Vector2(BAKE, BAKE)
+		vp.add_child(art)
+		add_child(vp)
+		await RenderingServer.frame_post_draw
+		var img := vp.get_texture().get_image()
+		img.convert(Image.FORMAT_RGB8)
+		img.generate_mipmaps()
+		_baked = ImageTexture.create_from_image(img)
+		_art = {"windows": art.windows.duplicate(), "chimneys": art.chimneys.duplicate(), "eye": art.eye}
+		vp.queue_free()
+	ground.texture = _baked
+	ground.scale = Vector2.ONE / BAKE
+
+
+func _process(_delta: float) -> void:
+	# dusk falls: the town cools and darkens and the lamps take over
+	shade.color = Color(0.95, 0.95, 1.0).lerp(Color(0.5, 0.54, 0.76), night)
+	_track()
 	actors.queue_redraw()
 	glow.queue_redraw()
+
+
+## Which way everyone faces, and how far into their stride they are.
+func _track() -> void:
+	for i in pos.size():
+		var p := pos[i]
+		var was: Vector2 = _last.get(i, p)
+		var d := p - was
+		if d.length() > 40:  # (taken away, let go, or a new snapshot order)
+			d = Vector2.ZERO
+		_face[i] = Figures.facing_of(d, _face.get(i, Figures.DOWN))
+		_step[i] = fmod(float(_step.get(i, float(i))) + d.length() * 0.42, TAU)
+		_last[i] = p
 
 
 func world_size() -> Vector2:
@@ -71,13 +116,13 @@ func world_size() -> Vector2:
 ## The person under a world point (for the ruler's clicks), or -1.
 func person_at(p: Vector2, only_seen := true) -> int:
 	var best := -1
-	var bd := 18.0
+	var bd := 22.0
 	for i in pos.size():
 		if bits[i] & Sim.B_HIDDEN:
 			continue
 		if only_seen and not seen.has(i):
 			continue
-		var d := pos[i].distance_to(p)
+		var d := (pos[i] + Vector2(0, -8)).distance_to(p)  # (the middle of them, not their feet)
 		if d < bd:
 			bd = d
 			best = i
@@ -98,91 +143,8 @@ func cam_sees(p: Vector2) -> bool:
 	return false
 
 
-# -------------------------------------------------------------- the ground
-
-class Ground extends Node2D:
-	var v: WorldView
-	var rng := RandomNumberGenerator.new()
-
-	func _init(view: WorldView) -> void:
-		v = view
-
-	func _draw() -> void:
-		var t := v.town
-		var T := Town.TILE
-		rng.seed = 11
-		draw_rect(Rect2(Vector2.ZERO, v.world_size()), Color("15171b"))
-		for y in t.h:
-			for x in t.w:
-				var c := t.tile(x, y)
-				var r := Rect2(x * T, y * T, T, T)
-				var n := rng.randf()
-				match c:
-					".":
-						draw_rect(r, Color("202328").lerp(Color("25292f"), n))
-					",":
-						draw_rect(r, Color("2b2b30").lerp(Color("303036"), n))
-						draw_rect(r, Color(0, 0, 0, 0.25), false, 1.0)
-					"o":
-						draw_rect(r, Color("231f1c").lerp(Color("29241f"), n))
-						for k in 3:
-							draw_circle(r.position + Vector2(rng.randf_range(4, 28), rng.randf_range(4, 28)), 3.5, Color("2f2924"))
-					"p":
-						draw_rect(r, Color("17221a").lerp(Color("1b281e"), n))
-					"G":
-						draw_rect(r, Color("202328"))
-						for k in 5:
-							draw_rect(Rect2(r.position + Vector2(3 + k * 6, 2), Vector2(2, 28)), Color("5a5e66"))
-					"C":
-						draw_rect(r, Color("0c0d0f"))
-						for k in 4:
-							draw_line(r.position + Vector2(4, 6 + k * 7), r.position + Vector2(28, 6 + k * 7), Color("3a3d42"), 2)
-					"T":
-						draw_rect(r, Color("17221a") if t.tile(x, y + 1) == "p" or t.tile(x, y - 1) == "p" else Color("2b2b30"))
-		# buildings over the ground: each run of solid tiles a slab with a lit edge
-		for y in t.h:
-			for x in t.w:
-				var c := t.tile(x, y)
-				if not c in "WHFMBQR":
-					continue
-				var r := Rect2(x * T, y * T, T, T)
-				var col: Color = {"W": Color("0f1013"), "H": Color("2c2f36"), "F": Color("33302b"), "M": Color("2e2a27"),
-					"B": Color("2a1214"), "Q": Color("2b2522"), "R": Color("d8d2c0")}[c]
-				draw_rect(r, col)
-				# roof edges where the slab meets the street
-				if not t.tile(x, y - 1) in "WHFMBQR":
-					draw_rect(Rect2(r.position, Vector2(T, 4)), col.lightened(0.12))
-				if not t.tile(x, y + 1) in "WHFMBQR":
-					draw_rect(Rect2(r.position + Vector2(0, T - 6), Vector2(T, 6)), col.darkened(0.45))
-				if c == "W" and (x + y) % 2 == 0:
-					draw_rect(Rect2(r.position + Vector2(8, 8), Vector2(16, 16)), Color("181a1e"))
-				if c in "HQ" and rng.randf() < 0.35:  # windows: a few lit, most dark
-					var lit := rng.randf() < 0.4
-					draw_rect(Rect2(r.position + Vector2(10, 11), Vector2(8, 9)), Color("e8b65a") if lit else Color("191b20"))
-				if c == "F" and x % 3 == 0:
-					draw_line(r.position + Vector2(0, 26), r.position + Vector2(16, 6), Color("4a463f"), 3)
-		# the Bureau's banner and the wall's posters
-		var bureau: Rect2i = t.districts.bureau
-		var b := Rect2(Vector2(43 * T, 24 * T), Vector2(13 * T, 7 * T))
-		draw_rect(Rect2(b.position + Vector2(b.size.x / 2 - 40, 10), Vector2(80, b.size.y - 20)), RED.darkened(0.25))
-		_eye(b.position + Vector2(b.size.x / 2, b.size.y / 2), 26)
-		draw_string(v.wall_font, b.position + Vector2(0, b.size.y - 20), "THE BUREAU", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 30, Color(0.85, 0.8, 0.7, 0.55))
-		var wall := Rect2(28 * T, 13 * T, 4 * T, T)
-		draw_string(v.wall_font, wall.position + Vector2(0, 22), "THE RULES", HORIZONTAL_ALIGNMENT_CENTER, wall.size.x, 22, Color("2a2a2e"))
-		# district names, faint, for finding your way
-		for k in t.districts:
-			var d: Rect2i = t.districts[k]
-			var name: String = t.names[k].to_upper().replace("THE ", "")
-			draw_string(v.font, Vector2(d.position.x * T + 8, d.position.y * T + 22), name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.78, 0.7, 0.32))
-
-	func _eye(c: Vector2, r: float) -> void:
-		var pts := PackedVector2Array()
-		for i in 25:
-			var a := PI * i / 12.0
-			pts.append(c + Vector2(cos(a) * r, sin(a) * r * 0.55 * (1 if i <= 12 else 1)))
-		draw_colored_polygon(pts, PAPER.darkened(0.2))
-		draw_circle(c, r * 0.42, Color("1a0c0d"))
-		draw_circle(c, r * 0.16, RED)
+func shows_cameras() -> bool:
+	return mode == "ruler" or mode == "eyes"
 
 
 # ---------------------------------------------------------------- the light
@@ -196,6 +158,7 @@ class Glow extends Node2D:
 		var g := Gradient.new()
 		g.set_color(0, Color(1, 1, 1, 1))
 		g.set_color(1, Color(1, 1, 1, 0))
+		g.add_point(0.4, Color(1, 1, 1, 0.45))
 		var gt := GradientTexture2D.new()
 		gt.gradient = g
 		gt.fill = GradientTexture2D.FILL_RADIAL
@@ -208,104 +171,192 @@ class Glow extends Node2D:
 	func _draw() -> void:
 		var tm := Time.get_ticks_msec() / 1000.0
 		var lamp := WorldView.LAMP
+		var n := v.night
 		for i in v.town.lamps.size():
-			var p: Vector2 = v.town.lamps[i]
+			var head: Vector2 = v.town.lamps[i] + Vector2(2, -21)
 			var flick := 1.0 if (i * 37) % 11 != 0 else 0.75 + 0.25 * absf(sin(tm * 9.0 + i))
-			var a := (0.10 + 0.22 * v.night) * flick
-			draw_texture_rect(tex, Rect2(p - Vector2(78, 78), Vector2(156, 156)), false, Color(lamp, a))
-			draw_circle(p, 3.0, Color(lamp, 0.6 + 0.4 * v.night))
+			var a := (0.06 + 0.3 * n) * flick
+			# the pool of light on the ground, a streak reflected in the wet, the bulb
+			draw_texture_rect(tex, Rect2(head + Vector2(-80, -46), Vector2(160, 120)), false, Color(lamp, a))
+			draw_texture_rect(tex, Rect2(head + Vector2(-7, 14), Vector2(14, 46)), false, Color(lamp, a * 0.9))
+			draw_texture_rect(tex, Rect2(head - Vector2(12, 12), Vector2(24, 24)), false, Color(lamp, 0.25 + 0.5 * n))
+		if n > 0.05:
+			for w in _art_list("windows"):
+				var r: Rect2 = w
+				draw_rect(r, Color(WorldView.LAMP, 0.35 * n))
+				draw_texture_rect(tex, r.grow(10), false, Color(WorldView.LAMP, 0.14 * n))
+		var eye: Vector2 = WorldView._art.get("eye", Vector2.ZERO)
+		if eye != Vector2.ZERO:
+			var pulse := 0.5 + 0.5 * sin(tm * 1.3)
+			draw_texture_rect(tex, Rect2(eye - Vector2(60, 40), Vector2(120, 80)), false, Color(1, 0.15, 0.2, (0.08 + 0.12 * n) * (0.7 + 0.3 * pulse)))
 		# the cameras' eyes: what the ruler sees is lit
-		if v.mode == "ruler" or v.mode == "eyes":
+		if v.shows_cameras():
 			for c in v.cams:
 				if c[3] == 0:
-					var mine: bool = int(c[2]) == v.seat
-					draw_texture_rect(tex, Rect2(Vector2(c[0], c[1]) - Vector2(Sim.CAM_R, Sim.CAM_R) * 1.25, Vector2(Sim.CAM_R, Sim.CAM_R) * 2.5), false,
-						Color(0.75, 0.85, 1.0, 0.32 if mine else 0.2))
+					var mine: bool = int(c[2]) == v.seat or v.mode == "eyes"
+					var R := Sim.CAM_R
+					draw_texture_rect(tex, Rect2(Vector2(c[0], c[1]) - Vector2(R, R) * 1.2, Vector2(R, R) * 2.4), false,
+						Color(0.7, 0.85, 1.0, 0.26 if mine else 0.14))
+
+	func _art_list(k: String) -> Array:
+		return WorldView._art.get(k, [])
 
 
 # ---------------------------------------------------------------- the people
 
 class Actors extends Node2D:
 	var v: WorldView
+	var rng := RandomNumberGenerator.new()
+	var fig := 1.0
 
 	func _init(view: WorldView) -> void:
 		v = view
 
 	func _draw() -> void:
 		var tm := Time.get_ticks_msec() / 1000.0
+		_splashes(tm)
 		# pages (citizens only): scraps of paper, catching the light
 		if v.mode == "citizen":
 			for g in v.pages:
 				var p := Vector2(g[0], g[1])
-				draw_set_transform(p, 0.4 + sin(p.x) * 0.5)
-				draw_rect(Rect2(-5, -6, 10, 12), WorldView.PAPER)
-				draw_line(Vector2(-3, -2), Vector2(3, -2), Color("8a8478"), 1)
-				draw_line(Vector2(-3, 1), Vector2(3, 1), Color("8a8478"), 1)
+				var bob := sin(tm * 2.5 + p.x) * 1.5
+				Figures.ellipse(self, p + Vector2(0, 4), 7, 2.5, Color(0, 0, 0, 0.35))
+				draw_set_transform(p + Vector2(0, -3 + bob), 0.3 + sin(p.x) * 0.4)
+				draw_rect(Rect2(-7, -9, 14, 18), Color("8a8070"))
+				draw_rect(Rect2(-6, -8, 12, 16), WorldView.PAPER)
+				draw_colored_polygon(PackedVector2Array([Vector2(2, -8), Vector2(6, -8), Vector2(6, -3)]), Color("b9b09a"))
+				for k in 4:
+					draw_line(Vector2(-4, -4 + k * 3.2), Vector2(3 - (k % 2) * 3, -4 + k * 3.2), Color("8a8478"), 1)
 				draw_set_transform(Vector2.ZERO)
-				draw_arc(p, 9 + 2 * sin(tm * 3), 0, TAU, 16, Color(1, 1, 1, 0.25), 1.5)
-		# cameras: a post with a lens; the circle it watches
+				var k2 := fmod(tm * 0.8 + p.x * 0.01, 1.0)
+				draw_arc(p + Vector2(0, -3), 12 + k2 * 10, 0, TAU, 24, Color(1, 0.95, 0.8, 0.5 * (1 - k2)), 2.0)
+		# cameras: the circle they watch, then the camera on its pole
 		for i in v.cams.size():
 			var c: Array = v.cams[i]
 			var p := Vector2(c[0], c[1])
 			var blind: bool = int(c[3]) == 1
-			if v.mode == "ruler" or v.mode == "eyes":
+			if v.shows_cameras():
 				var mine: bool = int(c[2]) == v.seat or v.mode == "eyes"
-				draw_arc(p, Sim.CAM_R, 0, TAU, 48, Color(0.7, 0.85, 1.0, 0.45 if mine else 0.2) if not blind else Color(1, 1, 1, 0.15), 2.0)
+				draw_arc(p, Sim.CAM_R, 0, TAU, 64, Color(0.7, 0.85, 1.0, 0.55 if mine else 0.25) if not blind else Color(1, 1, 1, 0.15), 2.5)
 				if i == v.picked_cam:
-					draw_arc(p, 20, 0, TAU, 24, Color.WHITE, 3)
+					draw_arc(p, 24, 0, TAU, 32, Color.WHITE, 3)
 			elif v.mode == "citizen":
 				# you know roughly where they look: a red ring, brighter when it's on you
-				var on_me: bool = v.me >= 0 and not blind and p.distance_to(v.pos[v.me]) < Sim.CAM_R
-				draw_arc(p, Sim.CAM_R, 0, TAU, 48, Color(WorldView.RED, 0.55 if on_me else 0.22), 2.0 if on_me else 1.5)
-			draw_circle(p + Vector2(0, 6), 5, Color(0, 0, 0, 0.4))
-			draw_rect(Rect2(p + Vector2(-2, -4), Vector2(4, 12)), Color("3a3d42"))
-			draw_circle(p + Vector2(0, -6), 7, Color("1a1c20"))
-			draw_circle(p + Vector2(0, -6), 3.5, WorldView.RED if not blind else Color("555"))
-		# people
+				var on_me: bool = v.me >= 0 and v.me < v.pos.size() and not blind and p.distance_to(v.pos[v.me]) < Sim.CAM_R
+				if on_me:
+					draw_circle(p, Sim.CAM_R, Color(WorldView.RED, 0.07))
+				draw_arc(p, Sim.CAM_R, 0, TAU, 64, Color(WorldView.RED, 0.7 if on_me else 0.3), 3.0 if on_me else 2.0)
+			_camera(p, blind, tm, i)
+		# people, back to front
+		var order := []
 		for i in v.pos.size():
-			var b: int = v.bits[i]
-			if b & Sim.B_HIDDEN:
+			if v.bits[i] & Sim.B_HIDDEN:
 				continue
-			var p := v.pos[i]
 			var visible := v.mode != "public"  # (the shared screen shows empty streets: the board must not be a camera)
-			if v.mode == "ruler" or v.mode == "eyes":
+			if v.shows_cameras():
 				visible = v.seen.has(i)
-			if not visible:
-				continue
-			_person(i, p, b, tm)
+			if visible:
+				order.append(i)
+		order.sort_custom(func(a, b): return v.pos[a].y < v.pos[b].y)
+		var hover := -1
+		if v.mode == "ruler":
+			hover = v.person_at(get_global_mouse_position())
+		# seen from far off (the whole town), people are drawn a little larger
+		fig = clampf(1.3 / get_canvas_transform().get_scale().x, 1.0, 1.45)
+		for i in order:
+			_person(i, v.pos[i], v.bits[i], tm, i == hover)
+		_smoke(tm)
 
-	func _person(i: int, p: Vector2, b: int, tm: float) -> void:
-		var look: int = v.looks[i]
-		var coat := Color(WorldView.COATS[look % WorldView.COATS.size()])
-		var hair := Color(WorldView.HAIR[(look * 5 + 1) % WorldView.HAIR.size()])
-		var moving := b & Sim.B_MOVING != 0
-		var hurry := b & Sim.B_HURRY != 0
-		var search := b & Sim.B_SEARCH != 0
-		var bob := sin(tm * (16.0 if hurry else 9.0) + i) * (1.5 if moving else 0.0)
-		if i == v.me:
-			draw_arc(p + Vector2(0, 5), 12, 0, TAU, 24, Color(1, 1, 1, 0.55), 2.0)
-		draw_set_transform(p + Vector2(0, 7), 0, Vector2(1, 0.45))
-		draw_circle(Vector2.ZERO, 8, Color(0, 0, 0, 0.45))
+	func _camera(p: Vector2, blind: bool, tm: float, i: int) -> void:
+		Figures.ellipse(self, p + Vector2(4, 4), 7, 3, Color(0, 0, 0, 0.4))
+		draw_rect(Rect2(p + Vector2(-2, -22), Vector2(4, 26)), Color("2a2d33"))
+		draw_rect(Rect2(p + Vector2(-1, -22), Vector2(1.5, 26)), Color("454952"))
+		# the housing, angled down at the street, and its lens
+		draw_set_transform(p + Vector2(0, -24), -0.35 + 0.25 * sin(tm * 0.6 + i))
+		draw_rect(Rect2(-9, -5, 18, 10), Color("101114"))
+		draw_rect(Rect2(-8, -4, 16, 8), Color("d6d2c6"))
+		draw_rect(Rect2(-8, 1, 16, 3), Color("a9a59a"))
+		draw_rect(Rect2(8, -3.5, 3, 7), Color("101114"))
+		draw_circle(Vector2(10, 0), 2.6, WorldView.RED if not blind else Color("555"))
 		draw_set_transform(Vector2.ZERO)
-		var h := 0.6 if search else 1.0
-		draw_rect(Rect2(p + Vector2(-6, -6 * h + bob * 0.3), Vector2(12, 12 * h)), coat)
-		draw_rect(Rect2(p + Vector2(-6, -6 * h + bob * 0.3), Vector2(12, 3)), coat.lightened(0.15))
-		draw_circle(p + Vector2(0, -9 * h + bob), 5.0, Color("c9b49a"))
-		draw_arc(p + Vector2(0, -10 * h + bob), 5.0, PI, TAU, 10, hair, 3.5)
-		if b & Sim.B_NOD:
-			var k := fmod(tm * 1.4, 1.0)
-			draw_arc(p + Vector2(0, -9), 8 + k * 14, 0, TAU, 20, Color(1, 1, 1, 0.6 * (1 - k)), 1.5)
-		if v.mode == "town" and v.cits.has(i):  # (watchers) the citizens, by number
-			draw_arc(p + Vector2(0, 5), 11, 0, TAU, 20, Color(WorldView.PAPER, 0.8), 2.0)
-			draw_string(v.font, p + Vector2(-30, -20), str(v.cits[i]), HORIZONTAL_ALIGNMENT_CENTER, 60, 14, WorldView.PAPER)
-		if (v.mode == "ruler" or v.mode == "eyes") and v.seen.has(i):
-			var sus: int = v.seen[i][0]
+		if not blind and fmod(tm + i * 0.37, 1.6) < 0.25:
+			draw_circle(p + Vector2(-5, -27), 1.6, Color(1, 0.3, 0.3))
+
+	func _person(i: int, p: Vector2, b: int, tm: float, hover: bool) -> void:
+		var search := b & Sim.B_SEARCH != 0
+		var moving := b & Sim.B_MOVING != 0
+		var nod := b & Sim.B_NOD != 0
+		var feet := p + Vector2(0, 7)
+		var watcher := v.shows_cameras() and v.seen.has(i)
+		# the ground under them: shadow, and your own ring
+		Figures.ellipse(self, feet, 9, 3.6, Color(0, 0, 0, 0.42))
+		if i == v.me:
+			_ring(feet, 13, 5.2, Color(WorldView.PAPER, 0.9), 2.0)
+		if watcher:
 			var flags: int = v.seen[i][1]
-			var bad := flags & ~(Sim.F_SEARCH | Sim.F_NOD) != 0 or flags & (Sim.F_SEARCH | Sim.F_NOD) != 0
-			if bad:
-				draw_arc(p, 13, 0, TAU, 20, WorldView.RED, 2.5)
-			if sus > 0:
-				draw_rect(Rect2(p + Vector2(-14, -26), Vector2(28, 4)), Color(0, 0, 0, 0.6))
-				draw_rect(Rect2(p + Vector2(-14, -26), Vector2(28 * sus / 100.0, 4)), WorldView.RED.lerp(Color("f2c94c"), 1.0 - sus / 100.0))
+			if flags != 0:
+				_ring(feet, 14, 5.6, WorldView.RED, 3.0)
 			if i == v.picked:
-				draw_arc(p, 17, 0, TAU, 24, Color.WHITE, 3)
+				_ring(feet, 17, 7, Color.WHITE, 3.0)
+			elif hover:
+				_ring(feet, 15, 6, Color(1, 1, 1, 0.6), 1.5)
+		if v.mode == "town" and v.cits.has(i):
+			_ring(feet, 14, 5.6, Color(WorldView.PAPER, 0.85), 2.0)
+		Figures.draw(self, feet, v.looks[i], v._face.get(i, Figures.DOWN), v._step.get(i, 0.0), moving, search, nod, fig)
+		var top := p + Vector2(0, -30 * fig + 7 * (fig - 1))
+		if nod:
+			var k := fmod(tm * 1.4, 1.0)
+			draw_arc(p + Vector2(0, -16), 10 + k * 16, 0, TAU, 24, Color(1, 1, 1, 0.7 * (1 - k)), 2.0)
+		if i == v.me:  # a marker over your head, so you never lose yourself in the crowd
+			var y := top.y - 6 + sin(tm * 3.0) * 1.5
+			var tri := PackedVector2Array([Vector2(p.x - 6, y - 7), Vector2(p.x + 6, y - 7), Vector2(p.x, y)])
+			draw_colored_polygon(PackedVector2Array([tri[0] + Vector2(-2, -1.5), tri[1] + Vector2(2, -1.5), tri[2] + Vector2(0, 2.5)]), Figures.INK)
+			draw_colored_polygon(tri, WorldView.PAPER)
+		if v.mode == "town" and v.cits.has(i):  # (watchers) the citizens, by number
+			_tag(top + Vector2(0, -4), str(v.cits[i]), WorldView.PAPER, Figures.INK)
+		if watcher:
+			var sus: int = v.seen[i][0]
+			if sus > 0:
+				var bar := Rect2(top + Vector2(-16, -8), Vector2(32, 5))
+				draw_rect(bar.grow(1), Color(0, 0, 0, 0.7))
+				draw_rect(Rect2(bar.position, Vector2(bar.size.x * sus / 100.0, bar.size.y)), WorldView.RED.lerp(Color("f2c94c"), 1.0 - sus / 100.0))
+
+	func _ring(c: Vector2, rx: float, ry: float, col: Color, width: float) -> void:
+		var pts := PackedVector2Array()
+		for k in 33:
+			var a := TAU * k / 32.0
+			pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
+		draw_polyline(pts, col, width, true)
+
+	func _tag(at: Vector2, text: String, fg: Color, bg: Color) -> void:
+		var w := v.font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 10
+		draw_rect(Rect2(at + Vector2(-w / 2, -16), Vector2(w, 18)), Color(bg, 0.85))
+		draw_string(v.font, at + Vector2(-w / 2 + 5, -2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, fg)
+
+	## Smoke from the chimneys, drifting off east with the weather.
+	func _smoke(tm: float) -> void:
+		var ch: Array = WorldView._art.get("chimneys", [])
+		for j in ch.size():
+			var p: Vector2 = ch[j] + Vector2(0, -13)
+			for k in 5:
+				var a := fmod(tm * 0.35 + k / 5.0 + j * 0.13, 1.0)
+				var c := p + Vector2(a * 34 + sin(tm + k) * 2, -a * 30)
+				draw_circle(c, 3 + a * 9, Color(0.62, 0.62, 0.66, 0.32 * (1 - a)))
+
+	## Rain landing: little rings on the street round about.
+	func _splashes(tm: float) -> void:
+		var view := get_viewport_rect()
+		var inv := get_canvas_transform().affine_inverse()
+		var a := inv * view.position
+		var b := inv * view.end
+		var area := Rect2(a, b - a)
+		rng.seed = 5
+		for k in 40:
+			var phase := fmod(tm * 1.7 + rng.randf(), 1.0)
+			var cyc := floorf(tm * 1.7 + rng.randf())
+			var sx := rng.randf()
+			var sy := rng.randf()
+			var p := area.position + Vector2(fposmod(sx + cyc * 0.618, 1.0) * area.size.x, fposmod(sy + cyc * 0.382, 1.0) * area.size.y)
+			if v.town.solid_at(p):
+				continue
+			_ring(p, 2 + phase * 6, (2 + phase * 6) * 0.4, Color(0.75, 0.82, 0.95, 0.35 * (1 - phase)), 1.0)

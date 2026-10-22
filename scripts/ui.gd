@@ -88,6 +88,88 @@ static func panel(parent: Node, alpha := 0.88) -> PanelContainer:
 	return p
 
 
+## A HUD card: dark, a little see-through, a thin paper rule along its top.
+static func card(parent: Node, alpha := 0.82) -> PanelContainer:
+	var p := PanelContainer.new()
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(INK, alpha)
+	s.border_color = Color(PAPER, 0.45)
+	s.border_width_top = 2
+	s.content_margin_left = 20
+	s.content_margin_right = 20
+	s.content_margin_top = 14
+	s.content_margin_bottom = 16
+	s.shadow_color = Color(0, 0, 0, 0.35)
+	s.shadow_size = 10
+	p.add_theme_stylebox_override("panel", s)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(p)
+	return p
+
+
+## A big action button with its key underneath, small: HURRY / Shift.
+static func action(title: String, key: String, on_press: Callable, parent: Node, width := 190.0) -> Button:
+	var b := button("", on_press, parent, Vector2(width, 78), 26)
+	b.focus_mode = Control.FOCUS_NONE
+	var v := VBoxContainer.new()
+	v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", -2)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(v)
+	var t := label(title, head, 28, PAPER, v)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var k := label(key, bold, 17, Color(PAPER, 0.7), v)
+	k.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	k.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return b
+
+
+## Torn pages as little sheets: the ones you hold, and dashed spaces for the rest.
+class Pages extends Control:
+	var have := 0
+	var need := 3
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(3 * 34, 40)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func set_count(h: int, n: int) -> void:
+		if h != have or n != need:
+			have = h
+			need = n
+			custom_minimum_size.x = n * 34
+			queue_redraw()
+
+	func _draw() -> void:
+		for i in need:
+			var r := Rect2(Vector2(i * 34 + 2, 3), Vector2(26, 34))
+			if i < have:
+				draw_set_transform(r.get_center(), -0.08 + 0.08 * i)
+				var c := Rect2(-r.size / 2, r.size)
+				draw_rect(c.grow(1.5), UI.INK)
+				draw_rect(c, UI.PAPER)
+				draw_colored_polygon(PackedVector2Array([c.position + Vector2(c.size.x - 8, 0), c.position + Vector2(c.size.x, 0), c.position + Vector2(c.size.x, 8)]), UI.MUTED)
+				for k in 4:
+					draw_line(c.position + Vector2(5, 10 + k * 5), c.position + Vector2(c.size.x - 5 - (k % 2) * 5, 10 + k * 5), Color("8a8478"), 1.5)
+				draw_set_transform(Vector2.ZERO)
+			else:
+				for k in 8:  # a dashed outline
+					var a := k / 8.0
+					var b2 := (k + 0.5) / 8.0
+					var per := func(t: float) -> Vector2:
+						var d := t * 2 * (r.size.x + r.size.y)
+						if d < r.size.x: return r.position + Vector2(d, 0)
+						d -= r.size.x
+						if d < r.size.y: return r.position + Vector2(r.size.x, d)
+						d -= r.size.y
+						if d < r.size.x: return r.position + Vector2(r.size.x - d, r.size.y)
+						d -= r.size.x
+						return r.position + Vector2(0, r.size.y - d)
+					draw_line(per.call(a), per.call(b2), Color(UI.PAPER, 0.45), 2)
+
+
 ## A rubber stamp: a word in a red box, a little crooked, ink a little worn.
 class Stamp extends Control:
 	var text := "APPROVED"
@@ -134,7 +216,7 @@ uniform float strength = 0.035;
 float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void fragment() {
 	vec2 d = (UV - 0.5) * vec2(1.0, 0.85);
-	float v = smoothstep(0.3, 0.9, length(d) * 1.3) * 0.7;  // the vignette's darkness
+	float v = smoothstep(0.45, 1.0, length(d) * 1.3) * 0.45;  // the vignette's darkness
 	float n = h(floor(FRAGCOORD.xy / 2.0) + floor(TIME * 18.0));
 	float g = strength;  // the grain's
 	float a = g + v - g * v;
